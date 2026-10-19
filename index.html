@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minha Rádio</title>
+<style>
+  :root { --bg:#f5f5f7; --card:#fff; --txt:#1d1d1f; --mut:#6e6e73; --acc:#3b6fe0; --bd:#e0e0e5; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16171a; --card:#222327; --txt:#f2f2f4; --mut:#9a9aa2; --acc:#6b97ff; --bd:#33343a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--txt); }
+  main { max-width:640px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--bd); border-radius:14px; padding:16px; margin-bottom:14px; }
+  h1 { font-size:1.2rem; margin:0 0 12px; }
+  label { display:block; font-size:.8rem; color:var(--mut); margin:8px 0 4px; }
+  input[type=text], input[type=password] { width:100%; padding:9px; border-radius:8px; border:1px solid var(--bd); background:var(--bg); color:var(--txt); }
+  button { cursor:pointer; border:1px solid var(--bd); background:var(--bg); color:var(--txt); border-radius:10px; padding:9px 14px; font-size:1rem; }
+  button.main { background:var(--acc); color:#fff; border-color:var(--acc); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  #title { font-weight:600; font-size:1.05rem; margin-bottom:10px; word-break:break-word; }
+  video { width:100%; border-radius:10px; background:#000; margin-bottom:10px; }
+  input[type=range] { width:100%; accent-color:var(--acc); }
+  .time { font-size:.8rem; color:var(--mut); display:flex; justify-content:space-between; }
+  #list { max-height:320px; overflow-y:auto; margin:8px 0 0; padding:0; list-style:none; }
+  #list li { padding:8px; border-radius:8px; cursor:pointer; font-size:.9rem; word-break:break-word; }
+  #list li:hover { background:var(--bg); }
+  #list li.on { background:var(--acc); color:#fff; }
+  #status { font-size:.85rem; color:var(--mut); margin-top:8px; }
+  .ctrl { justify-content:center; margin:10px 0; }
+  .vol { display:flex; gap:8px; align-items:center; font-size:.85rem; color:var(--mut); }
+  .vol input { flex:1; }
+</style>
+</head>
+<body>
+<main>
+  <div class="card" id="config">
+    <h1>🎵 Minha Rádio</h1>
+    <label for="folder">Link ou ID da pasta do Drive</label>
+    <input type="text" id="folder" placeholder="https://drive.google.com/drive/folders/...">
+    <label for="key">Chave de API do Google (Drive API v3)</label>
+    <input type="password" id="key" placeholder="AIza...">
+    <div class="row" style="margin-top:12px">
+      <button class="main" id="load">Carregar músicas</button>
+    </div>
+    <div id="status"></div>
+  </div>
+
+  <div class="card">
+    <div id="title">Carregando músicas...</div>
+    <div id="hint" class="time" style="margin-bottom:8px"></div>
+    <video id="media" playsinline></video>
+    <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
+    <div class="time"><span id="cur">0:00</span><span id="dur">0:00</span></div>
+    <div class="row ctrl">
+      <button id="prev" title="Anterior">⏮</button>
+      <button class="main" id="play" title="Tocar/Pausar">▶</button>
+      <button id="next" title="Próxima">⏭</button>
+      <button id="shuf" title="Embaralhar de novo">🔀</button>
+    </div>
+    <div class="vol">🔊 <input type="range" id="vol" min="0" max="1" step="0.01" value="1"></div>
+  </div>
+
+  <div class="card">
+    <strong id="count">Playlist</strong>
+    <ul id="list"></ul>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const media = $('media');
+let files = [], order = [], pos = 0;
+
+// Valores salvos no navegador (opcional: pode colocar FOLDER/KEY direto aqui)
+const DEFAULT_FOLDER = 'https://drive.google.com/drive/folders/1u794n3TRddzlbdVE3KXQVDCdVBwAYsLM?usp=sharing';
+//const DEFAULT_KEY = '';
+const AUTO = !!(DEFAULT_FOLDER && DEFAULT_KEY);
+if (AUTO) {
+  $('folder').value = DEFAULT_FOLDER;
+  $('key').value = DEFAULT_KEY;
+  $('config').style.display = 'none';
+} else {
+  try {
+    $('folder').value = localStorage.getItem('folder') || '';
+    $('key').value = localStorage.getItem('key') || '';
+  } catch (e) {}
+}
+
+function folderId(s) {
+  s = s.trim();
+  const m = s.match(/folders\/([\w-]+)/) || s.match(/[?&]id=([\w-]+)/);
+  return m ? m[1] : s;
+}
+
+function fmt(t) {
+  if (!isFinite(t)) return '0:00';
+  const m = Math.floor(t / 60), s = Math.floor(t % 60);
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+function shuffle(startWith) {
+  order = files.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  if (startWith !== undefined) {
+    order = order.filter(i => i !== startWith);
+    order.unshift(startWith);
+  }
+  pos = 0;
+}
+
+async function loadFiles() {
+  const folder = folderId($('folder').value), key = $('key').value.trim();
+  if (!folder || !key) { $('status').textContent = 'Informe a pasta e a chave de API.'; return; }
+  try { localStorage.setItem('folder', $('folder').value); localStorage.setItem('key', key); } catch (e) {}
+  $('status').textContent = 'Carregando...';
+  files = [];
+  let token = '';
+  try {
+    do {
+      const q = `'${folder}' in parents and trashed=false and (mimeType contains 'audio/' or mimeType contains 'video/')`;
+      const url = 'https://www.googleapis.com/drive/v3/files?pageSize=1000&orderBy=name'
+        + '&fields=nextPageToken,files(id,name,mimeType)'
+        + '&q=' + encodeURIComponent(q) + '&key=' + encodeURIComponent(key)
+        + (token ? '&pageToken=' + token : '');
+      const r = await fetch(url);
+      const d = await r.json();
+      if (d.error) throw new Error(d.error.message);
+      files.push(...d.files);
+      token = d.nextPageToken || '';
+    } while (token);
+  } catch (e) {
+    $('status').textContent = 'Erro: ' + e.message;
+    $('config').style.display = 'block';
+    return;
+  }
+  if (!files.length) { $('status').textContent = 'Nenhum arquivo de áudio/vídeo encontrado na pasta.'; return; }
+  $('status').textContent = files.length + ' arquivos encontrados.';
+  $('count').textContent = 'Playlist (' + files.length + ')';
+  renderList();
+  shuffle();
+  playCurrent();
+}
+
+function renderList() {
+  const ul = $('list');
+  ul.innerHTML = '';
+  files.forEach((f, i) => {
+    const li = document.createElement('li');
+    li.textContent = f.name.replace(/\.[^.]+$/, '');
+    li.onclick = () => { order = order.filter(x => x !== i); order.splice(pos + 1, 0, i); pos = pos + 1; playCurrent(); };
+    li.dataset.i = i;
+    ul.appendChild(li);
+  });
+}
+
+function playCurrent() {
+  const i = order[pos], f = files[i];
+  media.src = 'https://www.googleapis.com/drive/v3/files/' + f.id + '?alt=media&key=' + encodeURIComponent($('key').value.trim());
+  media.style.display = f.mimeType.startsWith('video/') ? 'block' : 'none';
+  $('title').textContent = f.name.replace(/\.[^.]+$/, '');
+  document.querySelectorAll('#list li').forEach(li => li.classList.toggle('on', +li.dataset.i === i));
+  const on = document.querySelector('#list li.on');
+  if (on) on.scrollIntoView({ block: 'nearest' });
+  $('hint').textContent = '';
+  media.play().catch(() => { $('hint').textContent = 'Toque em ▶ para começar.'; });
+  if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: $('title').textContent });
+}
+
+function next() {
+  if (!files.length) return;
+  pos++;
+  if (pos >= order.length) shuffle();
+  playCurrent();
+}
+function prev() {
+  if (!files.length) return;
+  if (media.currentTime > 3 || pos === 0) { media.currentTime = 0; return; }
+  pos--;
+  playCurrent();
+}
+
+$('load').onclick = loadFiles;
+$('next').onclick = next;
+$('prev').onclick = prev;
+$('shuf').onclick = () => { if (files.length) { shuffle(); playCurrent(); } };
+$('play').onclick = () => { if (!files.length) return; media.paused ? media.play() : media.pause(); };
+media.onplay = () => $('play').textContent = '⏸';
+media.onpause = () => $('play').textContent = '▶';
+media.onended = next;
+media.onerror = () => { $('status').textContent = 'Não consegui tocar este arquivo; indo para o próximo.'; setTimeout(next, 1200); };
+media.ontimeupdate = () => {
+  $('cur').textContent = fmt(media.currentTime);
+  if (media.duration) $('seek').value = (media.currentTime / media.duration) * 100;
+};
+media.onloadedmetadata = () => $('dur').textContent = fmt(media.duration);
+$('seek').oninput = e => { if (media.duration) media.currentTime = (e.target.value / 100) * media.duration; };
+$('vol').oninput = e => media.volume = e.target.value;
+
+if (AUTO) loadFiles();
+
+if ('mediaSession' in navigator) {
+  navigator.mediaSession.setActionHandler('nexttrack', next);
+  navigator.mediaSession.setActionHandler('previoustrack', prev);
+}
+</script>
+</body>
+</html>
