@@ -19,12 +19,6 @@
   button { cursor:pointer; border:1px solid var(--bd); background:var(--bg); color:var(--txt); border-radius:10px; padding:9px 14px; font-size:1rem; }
   button.main { background:var(--acc); color:#fff; border-color:var(--acc); }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  #stations { width:100%; padding:12px 14px; font-size:1rem; font-weight:700; font-family:inherit;
-    color:#fff; background:var(--acc); border:2px solid var(--acc); border-radius:12px; cursor:pointer; }
-  #stations:focus { outline:none; box-shadow:0 0 0 3px var(--bd); }
-  #stations option { background:var(--card); color:var(--txt); font-weight:400; }
-  #stationsCard label { margin:0 0 6px; }
-  #stationsCard { padding:12px; }
   #title { font-weight:600; font-size:1.05rem; margin-bottom:10px; word-break:break-word; }
   video { width:100%; border-radius:10px; background:#000; margin-bottom:10px; }
   input[type=range] { width:100%; accent-color:var(--acc); }
@@ -53,11 +47,6 @@
     <div id="status"></div>
   </div>
 
-  <div class="card" id="stationsCard" style="display:none">
-    <label for="stations">Estação</label>
-    <select id="stations"></select>
-  </div>
-
   <div class="card">
     <div id="title">Carregando músicas...</div>
     <div id="hint" class="time" style="margin-bottom:8px"></div>
@@ -82,22 +71,14 @@
 <script>
 const $ = id => document.getElementById(id);
 const media = $('media');
+let files = [], order = [], pos = 0;
 
-// ===== CONFIGURAÇÃO =====
+// Valores salvos no navegador (opcional: pode colocar FOLDER/KEY direto aqui)
+const DEFAULT_FOLDER = 'https://drive.google.com/drive/folders/1u794n3TRddzlbdVE3KXQVDCdVBwAYsLM?usp=sharing';
 const DEFAULT_KEY = 'AIzaSyBvtFzCMVkNlJfW9fxS71fSAXKpijPEa5c';
-// Cada linha é uma estação. A primeira toca ao abrir o app.
-const STATIONS = [
-  { nome: 'Louvores',  pasta: 'https://drive.google.com/drive/folders/1u794n3TRddzlbdVE3KXQVDCdVBwAYsLM?usp=sharing' },
-   { nome: 'Instrumental',  pasta: 'https://drive.google.com/drive/folders/1JnljJZNfULpkqFPiHQhHhNGPUwuGWnpC?usp=sharing' },
-  // { nome: 'Clássicas', pasta: 'https://drive.google.com/drive/folders/ID_DA_PASTA_3' },
-];
-// ========================
-
-let stations = [], cache = {}, files = [], order = [], pos = 0, current = -1, loadId = 0;
-const AUTO = !!(DEFAULT_KEY && STATIONS.length);
-
+const AUTO = !!(DEFAULT_FOLDER && DEFAULT_KEY);
 if (AUTO) {
-  stations = STATIONS;
+  $('folder').value = DEFAULT_FOLDER;
   $('key').value = DEFAULT_KEY;
   $('config').style.display = 'none';
 } else {
@@ -106,8 +87,6 @@ if (AUTO) {
     $('key').value = localStorage.getItem('key') || '';
   } catch (e) {}
 }
-
-const getKey = () => $('key').value.trim();
 
 function folderId(s) {
   s = s.trim();
@@ -121,68 +100,48 @@ function fmt(t) {
   return m + ':' + String(s).padStart(2, '0');
 }
 
-function shuffle() {
+function shuffle(startWith) {
   order = files.map((_, i) => i);
   for (let i = order.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [order[i], order[j]] = [order[j], order[i]];
   }
+  if (startWith !== undefined) {
+    order = order.filter(i => i !== startWith);
+    order.unshift(startWith);
+  }
   pos = 0;
 }
 
-async function fetchFolder(folder, key) {
-  let out = [], token = '';
-  do {
-    const q = `'${folder}' in parents and trashed=false and (mimeType contains 'audio/' or mimeType contains 'video/')`;
-    const url = 'https://www.googleapis.com/drive/v3/files?pageSize=1000&orderBy=name'
-      + '&fields=nextPageToken,files(id,name,mimeType)'
-      + '&q=' + encodeURIComponent(q) + '&key=' + encodeURIComponent(key)
-      + (token ? '&pageToken=' + token : '');
-    const d = await (await fetch(url)).json();
-    if (d.error) throw new Error(d.error.message);
-    out.push(...d.files);
-    token = d.nextPageToken || '';
-  } while (token);
-  return out;
-}
-
-function buildStations() {
-  const sel = $('stations');
-  sel.innerHTML = '';
-  stations.forEach((st, i) => {
-    const o = document.createElement('option');
-    o.value = i;
-    o.textContent = st.nome;
-    sel.appendChild(o);
-  });
-  sel.onchange = () => { const i = +sel.value; if (i !== current) loadStation(i); };
-  $('stationsCard').style.display = stations.length > 1 ? 'block' : 'none';
-}
-
-function markStation() {
-  $('stations').value = current;
-}
-
-async function loadStation(i) {
-  const id = ++loadId;
-  current = i;
-  markStation();
-  media.pause();
-  $('title').textContent = 'Carregando ' + stations[i].nome + '...';
-  $('hint').textContent = '';
+async function loadFiles() {
+  const folder = folderId($('folder').value), key = $('key').value.trim();
+  if (!folder || !key) { $('status').textContent = 'Informe a pasta e a chave de API.'; return; }
+  try { localStorage.setItem('folder', $('folder').value); localStorage.setItem('key', key); } catch (e) {}
+  $('status').textContent = 'Carregando...';
+  files = [];
+  let token = '';
   try {
-    if (!cache[i]) cache[i] = await fetchFolder(folderId(stations[i].pasta), getKey());
+    do {
+      const q = `'${folder}' in parents and trashed=false and (mimeType contains 'audio/' or mimeType contains 'video/')`;
+      const url = 'https://www.googleapis.com/drive/v3/files?pageSize=1000&orderBy=name'
+        + '&fields=nextPageToken,files(id,name,mimeType)'
+        + '&q=' + encodeURIComponent(q) + '&key=' + encodeURIComponent(key)
+        + (token ? '&pageToken=' + token : '');
+      const r = await fetch(url);
+      const d = await r.json();
+      if (d.error) throw new Error(d.error.message);
+      files.push(...d.files);
+      token = d.nextPageToken || '';
+    } while (token);
   } catch (e) {
-    if (id !== loadId) return;
     $('status').textContent = 'Erro: ' + e.message;
     $('config').style.display = 'block';
     return;
   }
-  if (id !== loadId) return;
-  files = cache[i];
+  if (!files.length) { $('status').textContent = 'Nenhum arquivo de áudio/vídeo encontrado na pasta.'; return; }
+  $('status').textContent = files.length + ' arquivos encontrados.';
   $('count').textContent = 'Playlist (' + files.length + ')';
   renderList();
-  if (!files.length) { $('title').textContent = 'Nenhum arquivo de áudio/vídeo nesta pasta.'; return; }
   shuffle();
   playCurrent();
 }
@@ -193,15 +152,15 @@ function renderList() {
   files.forEach((f, i) => {
     const li = document.createElement('li');
     li.textContent = f.name.replace(/\.[^.]+$/, '');
+    li.onclick = () => { order = order.filter(x => x !== i); order.splice(pos + 1, 0, i); pos = pos + 1; playCurrent(); };
     li.dataset.i = i;
-    li.onclick = () => { order = order.filter(x => x !== i); order.splice(pos + 1, 0, i); pos++; playCurrent(); };
     ul.appendChild(li);
   });
 }
 
 function playCurrent() {
   const i = order[pos], f = files[i];
-  media.src = 'https://www.googleapis.com/drive/v3/files/' + f.id + '?alt=media&key=' + encodeURIComponent(getKey());
+  media.src = 'https://www.googleapis.com/drive/v3/files/' + f.id + '?alt=media&key=' + encodeURIComponent($('key').value.trim());
   media.style.display = f.mimeType.startsWith('video/') ? 'block' : 'none';
   $('title').textContent = f.name.replace(/\.[^.]+$/, '');
   document.querySelectorAll('#list li').forEach(li => li.classList.toggle('on', +li.dataset.i === i));
@@ -225,18 +184,7 @@ function prev() {
   playCurrent();
 }
 
-// Modo manual (sem estações no código): usa os campos da tela
-$('load').onclick = () => {
-  const folder = $('folder').value, key = getKey();
-  if (!folder || !key) { $('status').textContent = 'Informe a pasta e a chave de API.'; return; }
-  try { localStorage.setItem('folder', folder); localStorage.setItem('key', key); } catch (e) {}
-  $('status').textContent = '';
-  stations = [{ nome: 'Pasta', pasta: folder }];
-  cache = {}; current = -1;
-  buildStations();
-  loadStation(0);
-};
-
+$('load').onclick = loadFiles;
 $('next').onclick = next;
 $('prev').onclick = prev;
 $('shuf').onclick = () => { if (files.length) { shuffle(); playCurrent(); } };
@@ -244,7 +192,7 @@ $('play').onclick = () => { if (!files.length) return; media.paused ? media.play
 media.onplay = () => $('play').textContent = '⏸';
 media.onpause = () => $('play').textContent = '▶';
 media.onended = next;
-media.onerror = () => { $('hint').textContent = 'Não consegui tocar este arquivo; indo para o próximo.'; setTimeout(next, 1200); };
+media.onerror = () => { $('status').textContent = 'Não consegui tocar este arquivo; indo para o próximo.'; setTimeout(next, 1200); };
 media.ontimeupdate = () => {
   $('cur').textContent = fmt(media.currentTime);
   if (media.duration) $('seek').value = (media.currentTime / media.duration) * 100;
@@ -253,7 +201,7 @@ media.onloadedmetadata = () => $('dur').textContent = fmt(media.duration);
 $('seek').oninput = e => { if (media.duration) media.currentTime = (e.target.value / 100) * media.duration; };
 $('vol').oninput = e => media.volume = e.target.value;
 
-if (AUTO) { buildStations(); loadStation(0); }
+if (AUTO) loadFiles();
 
 if ('mediaSession' in navigator) {
   navigator.mediaSession.setActionHandler('nexttrack', next);
