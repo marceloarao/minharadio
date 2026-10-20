@@ -73,6 +73,8 @@ const $ = id => document.getElementById(id);
 const media = $('media');
 let files = [], order = [], pos = 0;
 
+const VOLUME_INICIAL = 0.4; // 0 a 1 (0.4 = 40%)
+
 // Valores salvos no navegador (opcional: pode colocar FOLDER/KEY direto aqui)
 const DEFAULT_FOLDER = 'https://drive.google.com/drive/folders/1u794n3TRddzlbdVE3KXQVDCdVBwAYsLM?usp=sharing';
 const DEFAULT_KEY = 'AIzaSyBvtFzCMVkNlJfW9fxS71fSAXKpijPEa5c';
@@ -199,6 +201,8 @@ media.ontimeupdate = () => {
 };
 media.onloadedmetadata = () => $('dur').textContent = fmt(media.duration);
 $('seek').oninput = e => { if (media.duration) media.currentTime = (e.target.value / 100) * media.duration; };
+media.volume = VOLUME_INICIAL;
+$('vol').value = VOLUME_INICIAL;
 $('vol').oninput = e => media.volume = e.target.value;
 
 if (AUTO) loadFiles();
