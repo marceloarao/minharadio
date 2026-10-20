@@ -20,8 +20,10 @@
   button.main { background:var(--acc); color:#fff; border-color:var(--acc); }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   #stations { width:100%; padding:12px 14px; font-size:1rem; font-weight:700; font-family:inherit;
-    color:#00a99d; background:#f2f2f2; border:2px solid #00a99d; border-radius:12px; cursor:pointer; }
-  #stations:focus { outline:none; box-shadow:0 0 0 3px rgba(0,169,157,.3); }
+    color:#fff; background:var(--acc); border:2px solid var(--acc); border-radius:12px; cursor:pointer; }
+  #stations:focus { outline:none; box-shadow:0 0 0 3px var(--bd); }
+  #stations option { background:var(--card); color:var(--txt); font-weight:400; }
+  #stationsCard label { margin:0 0 6px; }
   #stationsCard { padding:12px; }
   #title { font-weight:600; font-size:1.05rem; margin-bottom:10px; word-break:break-word; }
   video { width:100%; border-radius:10px; background:#000; margin-bottom:10px; }
@@ -52,7 +54,8 @@
   </div>
 
   <div class="card" id="stationsCard" style="display:none">
-    <select id="stations" aria-label="Escolher estação"></select>
+    <label for="stations">Estação</label>
+    <select id="stations"></select>
   </div>
 
   <div class="card">
